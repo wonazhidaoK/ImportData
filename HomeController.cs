@@ -3,13 +3,18 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using MySql.Data.MySqlClient;
+using Newtonsoft.Json;
 using OfficeOpenXml;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Data;
 using System.Data.Common;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Text;
 using System.Threading.Tasks;
 
 
@@ -131,7 +136,7 @@ namespace ImportData
             string sFileName = $"{Guid.NewGuid()}.xlsx";
             FileInfo file = new FileInfo(Path.Combine(sWebRootFolder, sFileName));
             DataTable dt = GetCrjzCardDT();
-            var exceldt = GetExcelDT(excelfile, file, dt,1);
+            var exceldt = GetExcelDT(excelfile, file, dt, 1);
 
             List<DisposeDBModel> list = new List<DisposeDBModel>();
             string NotUserInfo = null;
@@ -200,7 +205,6 @@ namespace ImportData
                 throw new NotImplementedException(ex.Message);
             }
         }
-
 
         /// <summary>
         /// 大器械
@@ -558,7 +562,256 @@ namespace ImportData
             }
         }
 
+        /// <summary>
+        /// 余额数据同步
+        /// </summary>
+        /// <param name="excelfile"></param>
+        /// <returns></returns>
+        [HttpGet]
+        [Route("ds-savings")]
+        public async Task DSSavings(IFormFile excelfile)
+        {
+            string sWebRootFolder = _webHostEnvironment.WebRootPath;
+            string sFileName = $"{Guid.NewGuid()}.json";
+            var path = Path.Combine(sWebRootFolder, sFileName);
+            FileInfo file = new FileInfo(path);
 
+            using (FileStream fs = new FileStream(file.ToString(), FileMode.Create))
+            {
+                excelfile.CopyTo(fs);
+                fs.Flush();
+            }
+            string NotUserInfo = null;
+            string package = System.IO.File.ReadAllText(path, Encoding.Default);
+
+            List<SavingModel> list = JsonConvert.DeserializeObject<List<SavingModel>>(package);
+
+            foreach (var item in list)
+            {
+                var handler = new HttpClientHandler() { AutomaticDecompression = DecompressionMethods.GZip };
+                UserInfoModel userInfo = null;
+                using (var httpClient = new HttpClient())
+                {
+                    var requestUri = "https://loosen.microfeel.net/api/user/getList?Name=" + item.Name;
+                    var httpResponseMessage = await httpClient.GetAsync(requestUri);
+                    var responseConetent = await httpResponseMessage.Content.ReadAsStringAsync();
+                    userInfo = JsonConvert.DeserializeObject<List<UserInfoModel>>(responseConetent).FirstOrDefault();
+                }
+                if (userInfo == null)
+                {
+                    NotUserInfo += item.Name + "无用户信息" + "\n";
+                    continue;
+                }
+                //WithholdInputModel withhold = null;
+                switch (item.Type)
+                {
+                    case SavingType.通用余额:
+                        NotUserInfo += await NewMethod(item, handler, userInfo) + "\n";
+
+                        break;
+                    case SavingType.团教余额:
+                        NotUserInfo += await NewMethod(item, handler, userInfo) + "\n";
+                        break;
+                    case SavingType.私教余额:
+                        NotUserInfo += await NewMethod(item, handler, userInfo) + "\n";
+                        break;
+                    default:
+                        break;
+                }
+
+            }
+            using (StreamWriter txtFile = new StreamWriter(System.IO.File.Create(Path.Combine(sWebRootFolder, "余额3月.txt"))))
+            {
+                txtFile.WriteLine(NotUserInfo);
+            }
+
+
+            //return true;
+        }
+
+        /// <summary>
+        /// 卡卷数据同步
+        /// </summary>
+        /// <param name="excelfile"></param>
+        /// <returns></returns>
+        [HttpGet]
+        [Route("ds-coupons")]
+        public async Task DsCoupons(IFormFile excelfile)
+        {
+            string sWebRootFolder = _webHostEnvironment.WebRootPath;
+            string sFileName = $"{Guid.NewGuid()}.json";
+            var path = Path.Combine(sWebRootFolder, sFileName);
+            FileInfo file = new FileInfo(path);
+
+            using (FileStream fs = new FileStream(file.ToString(), FileMode.Create))
+            {
+                excelfile.CopyTo(fs);
+                fs.Flush();
+            }
+            string NotUserInfo = null;
+            string package = System.IO.File.ReadAllText(path, Encoding.Default);
+
+            List<CouponModel> list = JsonConvert.DeserializeObject<List<CouponModel>>(package);
+
+            foreach (var item in list)
+            {
+                var handler = new HttpClientHandler() { AutomaticDecompression = DecompressionMethods.GZip };
+                UserInfoModel userInfo = null;
+                using (var httpClient = new HttpClient())
+                {
+                    var requestUri = "https://loosen.microfeel.net/api/user/getList?Name=" + item.Name;
+                    var httpResponseMessage = await httpClient.GetAsync(requestUri);
+                    var responseConetent = await httpResponseMessage.Content.ReadAsStringAsync();
+                    userInfo = JsonConvert.DeserializeObject<List<UserInfoModel>>(responseConetent).FirstOrDefault();
+                }
+                if (userInfo == null)
+                {
+                    NotUserInfo += item.Name + "无用户信息" + "\n";
+                    continue;
+                }
+                List<Coupon> coupons = null;
+                using (var httpClient = new HttpClient())
+                {
+                    var requestUri = "https://loosen.microfeel.net/api/user/get-coupon?UserId=" + userInfo.Id+ "&CouponTypeName="+ item.Type;
+                    var httpResponseMessage = await httpClient.GetAsync(requestUri);
+                    var responseConetent = await httpResponseMessage.Content.ReadAsStringAsync();
+                    coupons = JsonConvert.DeserializeObject<List<Coupon>>(responseConetent);
+                }
+                if (coupons == null)
+                {
+                    NotUserInfo += item.Name + "无卡卷信息" + "\n";
+                    continue;
+                }
+                if (coupons.Count> item.Count)
+                {
+                    int useCount = coupons.Count - item.Count;
+                    for (int i = 0; i < useCount; i++)
+                    {
+                        using (var httpClient = new HttpClient())
+                        {
+                            var requestUri = "https://loosen.microfeel.net/api/user/use-coupon?couponId=" + coupons[i].Id;
+                            var httpResponseMessage = await httpClient.GetAsync(requestUri);
+                            var responseConetent = await httpResponseMessage.Content.ReadAsStringAsync();
+                            httpResponseMessage.EnsureSuccessStatusCode();
+                            if (httpResponseMessage.IsSuccessStatusCode)
+                            {
+                                NotUserInfo +=  "消耗:"+ coupons[i].CouponTypeName + "\n";
+                            }
+                        }
+                    }
+                }
+            }
+            using (StreamWriter txtFile = new StreamWriter(System.IO.File.Create(Path.Combine(sWebRootFolder, "卡卷.txt"))))
+            {
+                txtFile.WriteLine(NotUserInfo);
+            }
+        }
+        public class Coupon
+        {
+            public string SerialNO { get; set; }
+
+            public Guid CouponTypeId { get; set; }
+
+            public string CouponTypeName { get; set; }
+
+            public Guid Id { get; set; }
+
+            public ChannelType ChannelType { get; set; }
+
+            public DateTime StartValidTime { get; set; }
+
+            public DateTime EndValidTime { get; set; }
+
+            public virtual Guid UseUserId { get; set; }
+
+            //public virtual AppUser User { get; set; }
+
+            /// <summary>
+            /// 失效日期
+            /// </summary>
+            public DateTime LoseEfficacyTime { get; set; }
+        }
+        private static async Task<string> NewMethod(SavingModel item, HttpClientHandler handler, UserInfoModel userInfo)
+        {
+            string NotUserInfo = null;
+            if (userInfo.Balance_Common == item.Price)
+            {
+                NotUserInfo += item.Name + item.Type.ToString() + "信息准确，";
+
+            }
+            else if (userInfo.Balance_Common < item.Price)
+            {
+                RechargeInputModel RechargeInput = new RechargeInputModel
+                {
+                    Balance = item.Price - userInfo.Balance_Common,
+                    ChannelType = ChannelType.数据导入,
+                    Money = item.Price - userInfo.Balance_Common,
+                    OwnerId = userInfo.Id,
+                    SavingSource = SavingSource.平台已有数据导入,
+                    SavingType = item.Type
+                };
+                NotUserInfo += item.Name + "充值" + await PostRecharge(handler, RechargeInput);
+            }
+            else if (userInfo.Balance_Common > item.Price)
+            {
+                WithholdInputModel withhold = new WithholdInputModel
+                {
+                    PayPrice = userInfo.Balance_Common - item.Price,
+                    PayType = PayType.余额支付,
+                    UserId = userInfo.Id
+                };
+                NotUserInfo += item.Name + "扣款" + await PostWithhold(handler, withhold);
+
+            }
+
+            return NotUserInfo;
+        }
+
+        private static async Task<string> PostWithhold(HttpClientHandler handler, WithholdInputModel withholds)
+        {
+            string NotUserInfo = "";
+            using (var http = new HttpClient(handler))
+            {
+
+                var content = new StringContent(JsonConvert.SerializeObject(withholds), Encoding.UTF8, "application/json");
+
+
+                var response = await http.PostAsync("https://loosen.microfeel.net/api/saving/withhold", content);
+
+                response.EnsureSuccessStatusCode();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    NotUserInfo += withholds.PayType.ToString() + ":" + withholds.PayPrice;
+                }
+
+            }
+
+            return NotUserInfo;
+        }
+
+        private static async Task<string> PostRecharge(HttpClientHandler handler, RechargeInputModel recharge)
+        {
+            string NotUserInfo = "";
+            using (var http = new HttpClient(handler))
+            {
+
+                var content = new StringContent(JsonConvert.SerializeObject(recharge), Encoding.UTF8, "application/json");
+
+
+                var response = await http.PostAsync("https://loosen.microfeel.net/api/saving/recharge", content);
+
+                response.EnsureSuccessStatusCode();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    NotUserInfo += recharge.SavingType.ToString() + ":" + recharge.Balance;
+                }
+
+            }
+
+            return NotUserInfo;
+        }
         private static short _sn = 0;
         private static readonly object Locker = new object();
         /// <summary>
@@ -652,7 +905,7 @@ namespace ImportData
                         DataRow dr = dt.NewRow();
                         for (int c = sheet.Dimension.Start.Column; c <= sheet.Dimension.End.Column; c++)
                         {
-                            if(dr.ItemArray.Length< c)
+                            if (dr.ItemArray.Length < c)
                             {
                                 continue;
                             }
@@ -763,5 +1016,156 @@ namespace ImportData
             dt.Columns.Add("剩余金额", Type.GetType("System.String"));
             return dt;
         }
+    }
+
+    public class RechargeInputModel
+    {
+        [Required]
+        public decimal Balance { get; set; }
+
+        [Required]
+        public decimal Money { get; set; }
+
+        public DateTime? ExpiryDate { get; set; }
+
+        public SavingSource SavingSource { get; set; }
+
+        [Required]
+        public Guid OwnerId { get; set; }
+
+        [Required]
+        public SavingType SavingType { get; set; }
+
+        [Required]
+        public ChannelType ChannelType { get; set; }
+    }
+
+    public enum SavingSource
+    {
+        充值,
+        赠送,
+        退款,
+        平台已有数据导入
+    }
+
+    public enum SavingType
+    {
+        通用余额,
+        团教余额,
+        私教余额
+    }
+    public enum ChannelType
+    {
+        后台录入,
+        用户操作,
+        数据导入
+    }
+
+
+
+    internal class SavingModel
+    {
+        public string Name { get; set; }
+
+        public SavingType Type { get; set; }
+
+        public decimal Price { get; set; }
+    }
+
+    internal class CouponModel
+    {
+        public string Name { get; set; }
+
+        public string Type { get; set; }
+
+        public int Count { get; set; }
+    }
+
+    internal class UserInfoModel
+    {
+        public Guid Id { get; set; }
+
+        /// <summary>
+        /// 是否是Vip
+        /// </summary>
+        public bool IsVip { get; set; }
+
+        /// <summary>
+        /// 会员剩余天数
+        /// </summary>
+        public int Surplus { get; set; }
+
+        /// <summary>
+        /// 通用余额
+        /// </summary>
+        public decimal Balance_Common { get; set; }
+
+        /// <summary>
+        /// 团教课余额
+        /// </summary>
+        public decimal Balance_Group { get; set; }
+
+        /// <summary>
+        /// 私教课余额
+        /// </summary>
+        public decimal Balance_Personal { get; set; }
+
+        /// <summary>
+        /// 卡卷剩余数
+        /// </summary>
+        public int Card_detail { get; set; }
+
+        /// <summary>
+        /// 存在天数
+        /// </summary>
+        public int Exist { get; set; }
+
+        public string Name { get; set; }
+
+        public string PhoneNumber { get; set; }
+
+        public string Icon { get; set; }
+
+        public string Nickname { get; set; }
+
+        /// <summary>
+        /// 是否需要补充
+        /// </summary>
+        public bool IsSupplement { get; set; }
+
+        /// <summary>
+        /// 会员版本名称
+        /// </summary>
+        public string MemberEditionName { get; set; }
+
+        /// <summary>
+        /// 特权Url
+        /// </summary>
+        public string EditionUrl { get; set; }
+
+        /// <summary>
+        /// 版本图片
+        /// </summary>
+        public string EditionImg { get; set; }
+
+        public string BackgroundImage { get; set; }
+    }
+
+    public enum PayType
+    {
+        微信支付,
+        余额支付,
+        卡卷支付,
+        团课余额支付,
+        私教课余额支付
+    }
+
+    public class WithholdInputModel
+    {
+        public decimal PayPrice { get; set; }
+
+        public Guid UserId { get; set; }
+
+        public PayType PayType { get; set; }
     }
 }
