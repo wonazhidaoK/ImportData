@@ -606,24 +606,22 @@ namespace ImportData
                 switch (item.Type)
                 {
                     case SavingType.通用余额:
-                        NotUserInfo += await NewMethod(item, handler, userInfo) + "\n";
+                        NotUserInfo += await NewMethod(item, handler, userInfo, userInfo.Balance_Common) + "\n";
 
                         break;
                     case SavingType.团教余额:
-                        NotUserInfo += await NewMethod(item, handler, userInfo) + "\n";
+                        NotUserInfo += await NewMethod(item, handler, userInfo, userInfo.Balance_Group) + "\n";
                         break;
                     case SavingType.私教余额:
-                        NotUserInfo += await NewMethod(item, handler, userInfo) + "\n";
+                        NotUserInfo += await NewMethod(item, handler, userInfo, userInfo.Balance_Personal) + "\n";
                         break;
                     default:
                         break;
                 }
 
             }
-            using (StreamWriter txtFile = new StreamWriter(System.IO.File.Create(Path.Combine(sWebRootFolder, "余额3月.txt"))))
-            {
-                txtFile.WriteLine(NotUserInfo);
-            }
+            using StreamWriter txtFile = new StreamWriter(System.IO.File.Create(Path.Combine(sWebRootFolder, "余额3月.txt")));
+            txtFile.WriteLine(NotUserInfo);
 
 
             //return true;
@@ -672,7 +670,7 @@ namespace ImportData
                 List<Coupon> coupons = null;
                 using (var httpClient = new HttpClient())
                 {
-                    var requestUri = "https://loosen.microfeel.net/api/user/get-coupon?UserId=" + userInfo.Id+ "&CouponTypeName="+ item.Type;
+                    var requestUri = "https://loosen.microfeel.net/api/user/get-coupon?UserId=" + userInfo.Id + "&CouponTypeName=" + item.Type;
                     var httpResponseMessage = await httpClient.GetAsync(requestUri);
                     var responseConetent = await httpResponseMessage.Content.ReadAsStringAsync();
                     coupons = JsonConvert.DeserializeObject<List<Coupon>>(responseConetent);
@@ -682,30 +680,76 @@ namespace ImportData
                     NotUserInfo += item.Name + "无卡卷信息" + "\n";
                     continue;
                 }
-                if (coupons.Count> item.Count)
+                if (coupons.Count > item.Count)
                 {
                     int useCount = coupons.Count - item.Count;
                     for (int i = 0; i < useCount; i++)
                     {
-                        using (var httpClient = new HttpClient())
+                        using var httpClient = new HttpClient();
+                        var requestUri = "https://loosen.microfeel.net/api/user/use-coupon?couponId=" + coupons[i].Id;
+                        var httpResponseMessage = await httpClient.GetAsync(requestUri);
+                        var responseConetent = await httpResponseMessage.Content.ReadAsStringAsync();
+                        httpResponseMessage.EnsureSuccessStatusCode();
+                        if (httpResponseMessage.IsSuccessStatusCode)
                         {
-                            var requestUri = "https://loosen.microfeel.net/api/user/use-coupon?couponId=" + coupons[i].Id;
-                            var httpResponseMessage = await httpClient.GetAsync(requestUri);
-                            var responseConetent = await httpResponseMessage.Content.ReadAsStringAsync();
-                            httpResponseMessage.EnsureSuccessStatusCode();
-                            if (httpResponseMessage.IsSuccessStatusCode)
-                            {
-                                NotUserInfo +=  "消耗:"+ coupons[i].CouponTypeName + "\n";
-                            }
+                            NotUserInfo += "消耗:" + coupons[i].CouponTypeName + "\n";
                         }
                     }
                 }
             }
-            using (StreamWriter txtFile = new StreamWriter(System.IO.File.Create(Path.Combine(sWebRootFolder, "卡卷.txt"))))
-            {
-                txtFile.WriteLine(NotUserInfo);
-            }
+            using StreamWriter txtFile = new StreamWriter(System.IO.File.Create(Path.Combine(sWebRootFolder, "卡卷.txt")));
+            txtFile.WriteLine(NotUserInfo);
         }
+
+        /// <summary>
+        /// 私教产品数据同步
+        /// </summary>
+        /// <param name="excelfile"></param>
+        /// <returns></returns>
+        [HttpGet]
+        [Route("ds-personal-course-product")]
+        public async Task DsPersonalCourseProduct(IFormFile excelfile)
+        {
+            string sWebRootFolder = _webHostEnvironment.WebRootPath;
+            string sFileName = $"{GetNO("P")}.json";
+            var path = Path.Combine(sWebRootFolder, sFileName);
+
+            string package = ReadTest(excelfile, path);
+            string NotUserInfo = null;
+
+            List<ProductModel> list = JsonConvert.DeserializeObject<List<ProductModel>>(package);
+            foreach (var item in list)
+            {
+                var handler = new HttpClientHandler() { AutomaticDecompression = DecompressionMethods.GZip };
+                using var http = new HttpClient(handler);
+                var content = new StringContent(JsonConvert.SerializeObject(item), Encoding.UTF8, "application/json");
+
+
+                var response = await http.PostAsync("https://loosen.microfeel.net/api/product/add/personal-course-product", content);
+
+                response.EnsureSuccessStatusCode();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    NotUserInfo += item.UserName + "的" + item.Price + item.CourseName + "添加成功\n";
+                }
+            }
+            using StreamWriter txtFile = new StreamWriter(System.IO.File.Create(Path.Combine(sWebRootFolder, $"{GetNO("卡卷")}.txt")));
+            txtFile.WriteLine(NotUserInfo);
+        }
+
+        private static string ReadTest(IFormFile excelfile, string path)
+        {
+            FileInfo file = new FileInfo(path);
+            using (FileStream fs = new FileStream(file.ToString(), FileMode.Create))
+            {
+                excelfile.CopyTo(fs);
+                fs.Flush();
+            }
+            string package = System.IO.File.ReadAllText(path, Encoding.Default);
+            return package;
+        }
+
         public class Coupon
         {
             public string SerialNO { get; set; }
@@ -731,32 +775,33 @@ namespace ImportData
             /// </summary>
             public DateTime LoseEfficacyTime { get; set; }
         }
-        private static async Task<string> NewMethod(SavingModel item, HttpClientHandler handler, UserInfoModel userInfo)
+
+        private static async Task<string> NewMethod(SavingModel item, HttpClientHandler handler, UserInfoModel userInfo, decimal balance)
         {
             string NotUserInfo = null;
-            if (userInfo.Balance_Common == item.Price)
+            if (balance == item.Price)
             {
                 NotUserInfo += item.Name + item.Type.ToString() + "信息准确，";
 
             }
-            else if (userInfo.Balance_Common < item.Price)
+            else if (balance < item.Price)
             {
                 RechargeInputModel RechargeInput = new RechargeInputModel
                 {
-                    Balance = item.Price - userInfo.Balance_Common,
+                    Balance = item.Price - balance,
                     ChannelType = ChannelType.数据导入,
-                    Money = item.Price - userInfo.Balance_Common,
+                    Money = item.Price - balance,
                     OwnerId = userInfo.Id,
                     SavingSource = SavingSource.平台已有数据导入,
                     SavingType = item.Type
                 };
                 NotUserInfo += item.Name + "充值" + await PostRecharge(handler, RechargeInput);
             }
-            else if (userInfo.Balance_Common > item.Price)
+            else if (balance > item.Price)
             {
                 WithholdInputModel withhold = new WithholdInputModel
                 {
-                    PayPrice = userInfo.Balance_Common - item.Price,
+                    PayPrice = balance - item.Price,
                     PayType = PayType.余额支付,
                     UserId = userInfo.Id
                 };
@@ -812,8 +857,10 @@ namespace ImportData
 
             return NotUserInfo;
         }
+
         private static short _sn = 0;
         private static readonly object Locker = new object();
+
         /// <summary>
         /// 生成编号
         /// </summary>
@@ -840,7 +887,7 @@ namespace ImportData
             var cmd = db.Connection.CreateCommand() as MySqlCommand;
             cmd.CommandText = @"INSERT INTO `AppSavings` VALUES ('" + Guid.NewGuid() + "', '{}', NULL, now(), NULL, NULL, NULL, b'0', NULL, NULL, " + disposeDBModel.Balance + ", " + disposeDBModel.Balance + ", 3, '" + disposeDBModel.OwnerId + "', '" + disposeDBModel.Discriminator + "', NULL);";
             await cmd.ExecuteNonQueryAsync();
-            int Id = (int)cmd.LastInsertedId;
+            //int Id = (int)cmd.LastInsertedId;
         }
 
         private async Task InsertAsync(AppDb db, string sql)
@@ -848,7 +895,7 @@ namespace ImportData
             var cmd = db.Connection.CreateCommand() as MySqlCommand;
             cmd.CommandText = sql;
             await cmd.ExecuteNonQueryAsync();
-            int Id = (int)cmd.LastInsertedId;
+            //int Id = (int)cmd.LastInsertedId;
         }
 
         private async Task<List<UserModel>> ReadAllAsync(DbDataReader reader)
@@ -1079,6 +1126,19 @@ namespace ImportData
         public string Type { get; set; }
 
         public int Count { get; set; }
+    }
+
+    internal class ProductModel
+    {
+        public string CourseName { get; set; }
+
+        public string UserName { get; set; }
+
+        public decimal Price { get; set; }
+
+        public int PeopleNumber { get; set; }
+
+        public string Label { get; set; }
     }
 
     internal class UserInfoModel
