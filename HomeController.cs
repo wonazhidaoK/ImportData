@@ -750,6 +750,15 @@ namespace ImportData
             return package;
         }
 
+        /*
+         * 添加卡卷包产品
+         *  1.查找私教课程
+         *  2.查找私教产品
+         *  3.查找私教课程卡卷类型
+         *  4.查找私教课程卡卷产品
+         */
+
+
         public class Coupon
         {
             public string SerialNO { get; set; }
@@ -1139,6 +1148,8 @@ namespace ImportData
         public int PeopleNumber { get; set; }
 
         public string Label { get; set; }
+
+        public string Description { get; set; }
     }
 
     internal class UserInfoModel
