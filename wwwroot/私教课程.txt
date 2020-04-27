@@ -26,7 +26,7 @@
 {"Description":"全能训练",    "CourseName":"全能训练1V2",    "UserName":"杨国栋","Price":"300","PeopleNumber":"2","Label":"常人"},
 {"Description":"全能训练",    "CourseName":"全能训练1V3",    "UserName":"缪缪","Price":"200","PeopleNumber":"3","Label":"常人"},
 {"Description":"全能训练",    "CourseName":"全能训练1V3",    "UserName":"杨国栋","Price":"200","PeopleNumber":"3","Label":"常人"},
-{"Description":"普拉提大器械","CourseName":"普拉提大器械","UserName":"杰森","Price":"599","PeopleNumber":"1","Label":"常人"},
+{"Description":"普拉提大器械","CourseName":"初级合伙人普拉提大器械","UserName":"杰森","Price":"599","PeopleNumber":"1","Label":"常人"},
 {"Description":"针对性训练",  "CourseName":"针对性训练",  "UserName":"杰森","Price":"499","PeopleNumber":"1","Label":"常人"},
 {"Description":"针对性训练",  "CourseName":"针对性训练1V2",  "UserName":"杰森","Price":"260","PeopleNumber":"2","Label":"常人"},
 {"Description":"针对性训练",  "CourseName":"针对性训练1V3",  "UserName":"杰森","Price":"180","PeopleNumber":"3","Label":"常人"}
